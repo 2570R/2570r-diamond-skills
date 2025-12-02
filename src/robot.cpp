@@ -10,6 +10,10 @@
 #define ZETA 0.7
 #define BETA 0.02
 #define TRACKWIDTH 13.6
+#define FIELD_X_MAX 144.0
+#define FIELD_Y_MAX 144.0
+
+
 
 // motor groups
 pros::MotorGroup leftMotors({-11, -13, -14},
@@ -39,7 +43,7 @@ lemlib::ControllerSettings linearController(10, // proportional gain (kP)
 );
 
 // angular motion controller
-lemlib::ControllerSettings angularController(2.3, // proportional gain (kP)
+lemlib::ControllerSettings angularController(2.45, // proportional gain (kP)
                                              0, // integral gain (kI)
                                              15, // derivative gain (kD)
                                              3, // anti windup
@@ -157,7 +161,63 @@ void moveDistance(double inches, int timeout, double maxSpeed) {
 }
 
 
+void moveDistanceWFrontDist(double inches, int timeout, double maxSpeed) {
+    const double kP = MOVE_DISTANCE_P;
+    const double kD = LATERAL_KD;
 
+    const double tolerance         = LATERAL_SMALL_ERROR;
+    const int    smallErrorTimeout = LATERAL_SMALL_ERROR_TIMEOUT;
+    const int    loopDelay         = 10;
+
+    double start = frontSens.get()/25.4;
+    //const double DEG_TO_RAD = M_PI / 180.0;
+    //double theta0Rad = start.theta * DEG_TO_RAD;
+
+    double error     = inches;
+    double prevError = error;
+    double output    = 0.0;
+
+    uint32_t startTime             = pros::millis();
+    uint32_t withinSmallErrorStart = 0;
+
+    while (pros::millis() - startTime < static_cast<uint32_t>(timeout)) {
+        double cur = frontSens.get()/25.4;
+
+        error = inches - cur;
+
+        // small-error timeout
+        if (std::fabs(error) < tolerance) {
+            if (withinSmallErrorStart == 0) withinSmallErrorStart = pros::millis();
+            if (pros::millis() - withinSmallErrorStart >= (uint32_t)smallErrorTimeout) break;
+        } else {
+            withinSmallErrorStart = 0;
+        }
+
+        // PD controller with discrete derivative
+        double derivative = 0.0;
+        if (std::fabs(error) > tolerance * 2.0) {
+            double errorDelta = error - prevError;
+            derivative = errorDelta;   // dt baked into kD
+        }
+        prevError = error;
+
+        output = kP * error + kD * derivative;
+
+        // clamp
+        if (output > maxSpeed) output = maxSpeed;
+        if (output < -maxSpeed) output = -maxSpeed;
+
+        const double minMove = 5.0;
+        if (std::fabs(output) < minMove && std::fabs(error) > tolerance) {
+            output = (output >= 0 ? 1 : -1) * minMove;
+        }
+
+        chassis.tank((int)output, (int)output, true);
+        pros::delay(loopDelay);
+    }
+
+    chassis.tank(0, 0, true);
+}
 
 
 // ================== RAMSETE CORE (your existing code) ==================
@@ -391,6 +451,131 @@ void ramseteToPose(double targetX, double targetY, double targetThetaDeg,
 }
 
 TrajectoryGenerator generator(new DifferentialKinematics(12, 75, 75, 0.4), 0.01);
+
+
+double degToRad(double d) { return d * M_PI / 180.0; }
+
+// φ offsets for each sensor relative to robot forward
+// Change these if your sensors face different directions
+double PHI_FRONT = 0.0;
+double PHI_RIGHT = -90.0;
+double PHI_LEFT  = 90.0;
+
+double readSensor(pros::Distance &s) {
+    return s.get() / 25.4; // mm → inches
+}
+
+double getWallCoordinate(char wall) {
+    switch (wall) {
+        case 'N': return 72; // North wall is +Y max
+        case 'S': return -72;         // South wall is Y = -72
+        case 'E': return 72; // East wall is +X max
+        case 'W': return -72;         // West wall is X = 0
+    }
+    return 0.0;
+}
+
+double computeProjection(double d, double thetaDeg, double phiDeg, bool projectX) {
+    double the = degToRad(thetaDeg + phiDeg);
+
+    if (projectX)
+        return d * cos(the);
+    else
+        return d * sin(the);
+}
+
+lemlib::Pose relocalize(std::string walls, double headingDeg) {
+    lemlib::Pose p = {NAN, NAN, NAN};
+
+    bool useNorth = walls.find('N') != std::string::npos;
+    bool useSouth = walls.find('S') != std::string::npos;
+    bool useEast  = walls.find('E') != std::string::npos;
+    bool useWest  = walls.find('W') != std::string::npos;
+
+    double dFront = readSensor(frontSens);
+    double dRight = readSensor(rightSens);
+    double dLeft  = readSensor(leftSens);
+
+    // ---------- Y COORDINATE (North/South wall) ----------
+    if (useNorth || useSouth) {
+        char wall = useNorth ? 'N' : 'S';
+        double Ywall = getWallCoordinate(wall);
+
+        // Determine which sensor points toward the wall
+        // North wall = +Y direction
+        // South wall = -Y direction
+        double bestDist = INFINITY;
+        double sensorDist, phi;
+
+        if (useNorth) {
+            // sensor direction . global +Y
+            sensorDist = dFront; phi = PHI_FRONT;
+            bestDist = sensorDist * sin(degToRad(headingDeg + phi));
+
+            if (bestDist < 0) bestDist = INFINITY; // Wrong direction
+            // Check left
+            double projL = dLeft * sin(degToRad(headingDeg + PHI_LEFT));
+            if (projL > 0 && projL < bestDist) {sensorDist = dLeft; phi = PHI_LEFT; bestDist = projL;}
+            // Check right
+            double projR = dRight * sin(degToRad(headingDeg + PHI_RIGHT));
+            if (projR > 0 && projR < bestDist) {sensorDist = dRight; phi = PHI_RIGHT; bestDist = projR;}
+        }
+        else { // South (negative Y)
+            sensorDist = dFront; phi = PHI_FRONT;
+            bestDist = -sensorDist * sin(degToRad(headingDeg + phi));
+
+            if (bestDist < 0) bestDist = INFINITY;
+
+            double projL = -dLeft * sin(degToRad(headingDeg + PHI_LEFT));
+            if (projL > 0 && projL < bestDist) { sensorDist = dLeft; phi = PHI_LEFT; bestDist = projL; }
+
+            double projR = -dRight * sin(degToRad(headingDeg + PHI_RIGHT));
+            if (projR > 0 && projR < bestDist) { sensorDist = dRight; phi = PHI_RIGHT; bestDist = projR; }
+        }
+
+        double projY = computeProjection(sensorDist, headingDeg, phi, false);
+        if (useSouth) projY = -projY;
+
+        p.y = Ywall - projY;
+    }
+
+
+    // ---------- X COORDINATE (East/West wall) ----------
+    if (useEast || useWest) {
+        char wall = useEast ? 'E' : 'W';
+        double Xwall = getWallCoordinate(wall);
+
+        double bestDist = INFINITY;
+        double sensorDist, phi;
+
+        if (useEast) { // +X
+            sensorDist = dRight; phi = PHI_RIGHT; bestDist = sensorDist * cos(degToRad(headingDeg + phi));
+
+            double projF = dFront * cos(degToRad(headingDeg + PHI_FRONT));
+            if (projF > 0 && projF < bestDist) { sensorDist = dFront; phi = PHI_FRONT; bestDist = projF; }
+
+            double projL = dLeft * cos(degToRad(headingDeg + PHI_LEFT));
+            if (projL > 0 && projL < bestDist) { sensorDist = dLeft; phi = PHI_LEFT; bestDist = projL; }
+        }
+        else { // West, -X
+            sensorDist = dLeft; phi = PHI_LEFT; bestDist = -sensorDist * cos(degToRad(headingDeg + phi));
+
+            double projF = -dFront * cos(degToRad(headingDeg + PHI_FRONT));
+            if (projF > 0 && projF < bestDist) { sensorDist = dFront; phi = PHI_FRONT; bestDist = projF; }
+
+            double projR = -dRight * cos(degToRad(headingDeg + PHI_RIGHT));
+            if (projR > 0 && projR < bestDist) { sensorDist = dRight; phi = PHI_RIGHT; bestDist = projR; }
+        }
+
+        double projX = computeProjection(sensorDist, headingDeg, phi, true);
+        if (useWest) projX = -projX;
+
+        p.x = Xwall - projX;
+    }
+
+
+    return p;
+}
 
 /*impl
 CubicBezier *testPath;
