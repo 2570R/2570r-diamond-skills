@@ -51,6 +51,7 @@ extern pros::Distance leftSens;
 extern pros::Optical ballSens;
 extern void moveDistance(double inches, int timeout, double maxSpeed = 127);
 extern void moveDistanceWFrontDist(double inches, int timeout, double maxSpeed = 127);
+extern void moveDistanceWFrontDistAngular(double inches, int timeout, double maxSpeed = 127);
 extern void _ramseteCore(double targetX, double targetY,
                          bool useFinalHeading, double targetThetaDeg,
                          bool backwards,
@@ -62,3 +63,4 @@ extern void ramseteToPoint(double targetX, double targetY,
                            RamseteParamsPublic params = {});
 extern TrajectoryGenerator generator;
 extern lemlib::Pose relocalize(std::string walls, double headingDeg);
+extern void maintainHeadingWVoltage(double maxSpeed, double timeout);

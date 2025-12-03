@@ -1,7 +1,7 @@
 #include "robot.h"
 
-#define LATERAL_KD 0.5
-#define MOVE_DISTANCE_P 0.5
+#define LATERAL_KD 1.5
+#define MOVE_DISTANCE_P 3.8
 #define LATERAL_SMALL_ERROR 0.6
 #define ANGULAR_SMALL_ERROR 1.0
 #define LATERAL_SMALL_ERROR_TIMEOUT 300
@@ -87,7 +87,7 @@ pros::ADIDigitalOut wing('A');
 
 pros::Distance frontSens(1);
 pros::Distance rightSens(4);
-pros::Distance leftSens(12);
+pros::Distance leftSens(7);
 pros::Optical ballSens(10);
 
 pros::Controller controller(pros::E_CONTROLLER_MASTER);
@@ -170,21 +170,16 @@ void moveDistanceWFrontDist(double inches, int timeout, double maxSpeed) {
     const int    loopDelay         = 10;
 
     double start = frontSens.get()/25.4;
-    //const double DEG_TO_RAD = M_PI / 180.0;
-    //double theta0Rad = start.theta * DEG_TO_RAD;
 
     double error     = inches;
     double prevError = error;
     double output    = 0.0;
-
     uint32_t startTime             = pros::millis();
     uint32_t withinSmallErrorStart = 0;
-
+    double derivative = 0.0;
     while (pros::millis() - startTime < static_cast<uint32_t>(timeout)) {
         double cur = frontSens.get()/25.4;
-
-        error = start - cur;
-
+        error = (cur - inches);
         // small-error timeout
         if (std::fabs(error) < tolerance) {
             if (withinSmallErrorStart == 0) withinSmallErrorStart = pros::millis();
@@ -213,6 +208,73 @@ void moveDistanceWFrontDist(double inches, int timeout, double maxSpeed) {
         }
 
         chassis.tank((int)output, (int)output, true);
+        if(error <= 0.2){
+            break;
+        }
+        pros::delay(loopDelay);
+    }
+
+    chassis.tank(0, 0, true);
+}
+void moveDistanceWFrontDistAngular(double inches, int timeout, double maxSpeed) {
+    const double kP = MOVE_DISTANCE_P;
+    const double kD = LATERAL_KD;
+
+    const double tolerance         = LATERAL_SMALL_ERROR;
+    const int    smallErrorTimeout = LATERAL_SMALL_ERROR_TIMEOUT;
+    const int    loopDelay         = 10;
+
+    double start = frontSens.get()/25.4;
+    double angularStart = imu.get_heading();
+
+    lemlib::PID angularPID = lemlib::PID(0.5, 0, 2);
+    double error     = inches;
+    double prevError = error;
+    double output    = 0.0;
+    uint32_t startTime             = pros::millis();
+    uint32_t withinSmallErrorStart = 0;
+    double derivative = 0.0;
+    angularPID.reset();
+    while (pros::millis() - startTime < static_cast<uint32_t>(timeout)) {
+        double cur = frontSens.get()/25.4;
+        double angError = imu.get_heading() - angularStart;
+        error = (cur - inches);
+        // small-error timeout
+        if (std::fabs(error) < tolerance) {
+            if (withinSmallErrorStart == 0) withinSmallErrorStart = pros::millis();
+            if (pros::millis() - withinSmallErrorStart >= (uint32_t)smallErrorTimeout) break;
+        } else {
+            withinSmallErrorStart = 0;
+        }
+        double angOutput = angularPID.update(angError);
+        // PD controller with discrete derivative
+        double derivative = 0.0;
+        if (std::fabs(error) > tolerance * 2.0) {
+            double errorDelta = error - prevError;
+            derivative = errorDelta;   // dt baked into kD
+        }
+        prevError = error;
+
+        output = kP * error + kD * derivative;
+
+        // clamp
+        if (output > maxSpeed) output = maxSpeed;
+        if (output < -maxSpeed) output = -maxSpeed;
+        if (angOutput > 90) angOutput = 90;
+        if (angOutput < -90) angOutput = -90;
+
+        const double minMove = 5.0;
+        if (std::fabs(output) < minMove && std::fabs(error) > tolerance) {
+            output = (output >= 0 ? 1 : -1) * minMove;
+        }
+        
+        if(error <= 2){
+           angOutput = 0;
+        }
+        chassis.tank((int)output - angOutput, (int)output + angOutput, true);
+        if(error <= 0.2){
+            break;
+        }
         pros::delay(loopDelay);
     }
 
@@ -577,6 +639,18 @@ lemlib::Pose relocalize(std::string walls, double headingDeg) {
     return p;
 }
 
+void maintainHeadingWVoltage(double maxSpeed, double timeout){
+    double currAngle = imu.get_heading();
+    lemlib::PID angularPID(3, 0, 5);
+    angularPID.reset();
+    double start = pros::millis();
+    while((pros::millis() - start)>timeout){
+        double angle = imu.get_heading();
+        double error = angle - currAngle;
+        double output = angularPID.update(error);
+        chassis.tank(maxSpeed - output, maxSpeed + output);
+    }
+}
 /*impl
 CubicBezier *testPath;
   testPath = new CubicBezier({12, 36}, {12, 60}, {36, 36}, {36, 60});
