@@ -700,7 +700,7 @@ lemlib::Pose relocalize(std::string walls, double headingDeg) {
 }
 
 void maintainHeadingWVoltage(double maxSpeed, double timeout, bool stop){
-    lemlib::PID angularPID      = lemlib::PID(0.5, 0, 5);
+    lemlib::PID angularPID      = lemlib::PID(2, 0, 5);
     const int    loopDelay      = 10;
 
     const double DEG2RAD        = M_PI / 180.0;
@@ -722,9 +722,20 @@ void maintainHeadingWVoltage(double maxSpeed, double timeout, bool stop){
 
         //update PID
         double output = angularPID.update(error);
-
+        
+        if(fabs(error) < 1.8){
+            output = 0;
+        }
         //set speed
-        chassis.tank(maxSpeed - output, maxSpeed + output);
+        if(error > 1.81){
+            chassis.tank((int)maxSpeed, (int)maxSpeed + output, true);
+
+        } else if(error < -1.81){
+            chassis.tank((int)maxSpeed + output, (int)maxSpeed, true);
+
+        } else{
+            chassis.tank((int)maxSpeed, (int)maxSpeed, true);
+        }
 
         pros::delay(loopDelay);
     }

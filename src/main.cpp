@@ -442,10 +442,7 @@ void diamondSkills(){
     //matchloader.set_value(true);
     chassis.tank(127,127);
     pros::delay(200);
-    chassis.tank(100,100);
-    matchloader.set_value(false);
-    pros::delay(2400);
-    chassis.tank(0,0);
+    maintainHeadingWVoltage(100, 2400, true);
     chassis.turnToHeading(0, 600, {.maxSpeed = 127});
     chassis.waitUntilDone();
     moveDistanceWFrontDist(29, 700, 127);
