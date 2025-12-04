@@ -7,7 +7,12 @@
 double intakeSpeed = 0;
 double hoodSpeed = 0;
 
-
+void manualIntake(double intake_speed, double hood_speed){
+    intakeSpeed = intake_speed;
+    hoodSpeed = hood_speed;
+    intake.move(intakeSpeed);
+    hood.move(hoodSpeed);
+}
 void stopIntake() {
     intakeSpeed = 0;
     hoodSpeed = 0;
@@ -42,6 +47,19 @@ void storeIntake(){
     hoodSpeed = -50;
     intake.move(127);
     hood.move(-50);
+}
+
+void skillsLongGoalScore(){
+    outtake();
+    pros::delay(100);
+    scoreLongGoal();
+}
+
+void scoreMiddleGoalScore(){
+    while(!(ballSens.get_hue() > 1 && ballSens.get_hue() < 10)){
+        manualIntake(90, 80);
+    }
+    stopIntake();
 }
 
 void antiJamTask(){
