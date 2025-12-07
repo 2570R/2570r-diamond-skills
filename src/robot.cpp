@@ -209,9 +209,13 @@ void moveDistanceWFrontDist(double inches, int timeout, double maxSpeed) {
         if (std::fabs(output) < minMove && std::fabs(error) > tolerance) {
             output = (output >= 0 ? 1 : -1) * minMove;
         }
-
-        chassis.tank((int)output, (int)output, true);
-        if(error <= 0.2){
+        if(error < 0){
+            chassis.tank((int)-output, (int)-output, true);
+        } else{
+            chassis.tank((int)output, (int)output, true);
+        }
+        //chassis.tank((int)output, (int)output, true);
+        if(fabs(error) <= 0.2){
             break;
         }
         pros::delay(loopDelay);
