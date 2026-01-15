@@ -39,9 +39,9 @@ lemlib::ControllerSettings linearController(10, // proportional gain (kP)
                                             35, // derivative gain (kD)
                                             3, // anti windup
                                             1, // small error range, in inches
-                                            50, // small error range timeout, in milliseconds
+                                            10, // small error range timeout, in milliseconds
                                             3, // large error range, in inches
-                                            150, // large error range timeout, in milliseconds
+                                            40, // large error range timeout, in milliseconds
                                             0// maximum acceleration (slew)
 );
 
@@ -51,9 +51,9 @@ lemlib::ControllerSettings angularController(2.45, // proportional gain (kP)
                                              15, // derivative gain (kD)
                                              3, // anti windup
                                              0.5, // small error range, in degrees
-                                             20, // small error range timeout, in milliseconds
+                                             10, // small error range timeout, in milliseconds
                                              3, // large error range, in degrees
-                                             60, // large error range timeout, in milliseconds
+                                             40, // large error range timeout, in milliseconds
                                              0 // maximum acceleration (slew)
 );
 
